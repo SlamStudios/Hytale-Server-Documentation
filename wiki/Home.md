@@ -1,35 +1,27 @@
 # Hytale Server Documentation
 
-Comprehensive documentation for the decompiled **Hytale Server**, covering architecture, systems, and internal modules. This repository serves as a technical reference for developers exploring how the Hytale server is structured and how its core systems operate.
-
-> **Disclaimer**: This documentation is based on analysis of decompiled server code. It is intended for educational and research purposes.
-
----
+Welcome to the comprehensive documentation for the decompiled Hytale Server. This wiki provides detailed information about the server's architecture, systems, and modules.
 
 ## Overview
 
-The Hytale Server is a Java-based game server developed by **Hypixel Studios**. It uses a modular, plugin-driven architecture, an **Entity Component System (ECS)** for game logic, and modern networking via **QUIC** with **TCP fallback**.
+The Hytale Server is a sophisticated Java-based game server developed by Hypixel Studios. It features a modular plugin architecture, an Entity Component System (ECS) for game logic, and uses the QUIC/TCP protocols for networking.
 
 ### Key Features
 
-- **Plugin-Based Architecture** – Modular systems loaded as plugins
-- **Entity Component System (ECS)** – Data-driven entity and system design
-- **Asset Store System** – Dynamic asset loading and hot-reloading
-- **Procedural World Generation** – Terrain, structures, and biome generation
-- **QUIC + TCP Networking** – High-performance networking via Netty
+- **Plugin-Based Architecture**: Modular design allowing features to be loaded as plugins
+- **Entity Component System (ECS)**: Modern game architecture for entities and systems
+- **Asset Store System**: Dynamic asset loading and hot-reloading capabilities
+- **Procedural World Generation**: Advanced terrain and structure generation
+- **QUIC + TCP Networking**: Modern network protocol support via Netty
 
----
-
-## Documentation Navigation
+## Quick Navigation
 
 ### Core Systems
-
 - [Architecture Overview](Architecture)
 - [Server Lifecycle](Server-Lifecycle)
 - [Configuration](Configuration)
 
 ### Modules
-
 - [Plugin System](Plugin-System)
 - [Event System](Event-System)
 - [Component System (ECS)](Component-System)
@@ -40,38 +32,32 @@ The Hytale Server is a Java-based game server developed by **Hypixel Studios**. 
 - [Command System](Command-System)
 
 ### Built-in Plugins
-
 - [World Generation](Built‐in-Plugins#worldgenplugin)
 - [Block Physics](Built‐in-Plugins#blockphysicsplugin)
 - [Crafting System](Built‐in-Plugins#craftingplugin)
 - [NPC System](Built‐in-Plugins#npceditorplugin)
 - [Weather System](Built‐in-Plugins#weatherplugin)
-- [All Built-in Plugins](Built-in-Plugins)
+- [All Builtin Plugins](Built-in-Plugins.md)
 
 ### Development
-
 - [Creating Plugins](Creating-Plugins)
 - [Asset Types](Asset-Types)
-- [Block Types](Block-Types)
+- [Block Types](Block-Types.md)
 - [Entity Types](Entity-Types)
-
----
 
 ## Technical Details
 
 | Property | Value |
-|---------|-------|
+|----------|-------|
 | Default Port | 5520 |
 | Protocol | QUIC (primary), TCP (fallback) |
 | Language | Java |
 | Network Library | Netty |
-| Configuration Format | JSON |
-
----
+| Configuration | JSON |
 
 ## Package Structure
 
-```text
+```
 com.hypixel.hytale
 ├── Main.java                    # Application entry point
 ├── LateMain.java               # Post-classloader initialization
@@ -111,24 +97,13 @@ com.hypixel.hytale
 └── storage/                    # Data persistence
 ```
 
----
-
 ## Getting Started
 
-1. Read the [Architecture Overview](Architecture) to understand the overall design
-2. Review the [Plugin System](Plugin-System) to learn how functionality is extended
-3. Explore the [Event System](Event-System) to see how server events are dispatched
-4. Inspect [Built-in Plugins](Built-in-Plugins) for real-world implementation examples
-
----
+1. Review the [Architecture Overview](Architecture) to understand the system design
+2. Learn about the [Plugin System](Plugin-System) for extending functionality
+3. Explore the [Event System](Event-System) for hooking into server events
+4. Check out [Builtin Plugins](Builtin-Plugins) for implementation examples
 
 ## Contributing
 
-Contributions, corrections, and clarifications are welcome. If you discover inaccuracies or have additional insights from further analysis, feel free to open a pull request or issue.
-
----
-
-## License
-
-This repository contains documentation only. All original code, names, and assets related to Hytale are the property of Hypixel Studios.
-
+This documentation is generated from analysis of decompiled code. Contributions and corrections are welcome.
