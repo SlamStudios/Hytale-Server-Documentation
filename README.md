@@ -32,8 +32,8 @@ The Hytale Server is a Java-based game server developed by **Hypixel Studios**. 
 
 - [Plugin System](Plugin-System)
 - [Event System](Event-System)
-- [Component System (ECS)](Component-System)
-- [Networking & Protocol](Networking)
+- [Component System (ECS)](Component-System-(ECS))
+- [Networking & Protocol](Networking-&-Protocol)
 - [Entity System](Entity-System)
 - [World & Universe](World-Universe)
 - [Asset Store](Asset-Store)
