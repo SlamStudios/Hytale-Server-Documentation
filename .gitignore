@@ -1,0 +1,6 @@
+src/
+decompiled-hytale-server/
+.idea/
+.gitignore
+HytaleServer.jar
+HytaleServer.jar.src.zip
