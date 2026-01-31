@@ -1,39 +1,32 @@
+# Event Types
 
-This document provides a comprehensive reference of all event types in the Hytale Server. Events enable communication between systems and plugins.
+This document provides a reference of event types in the Hytale Server. All events listed are verified from the decompiled source code.
 
 ## Overview
 
-Events are dispatched through the [Event System](Event-System) to notify listeners of game occurrences. Events can be synchronous or asynchronous, and some can be cancelled.
-
-## Event Categories
-
-- [Server Events](#server-events)
-- [Player Events](#player-events)
-- [Entity Events](#entity-events)
-- [World Events](#world-events)
-- [Block Events](#block-events)
-- [Inventory Events](#inventory-events)
-- [Combat Events](#combat-events)
-- [Asset Events](#asset-events)
-- [Network Events](#network-events)
+Events are dispatched through the [Event System](Event-System) to notify listeners of game occurrences. Events implement either `IEvent<K>` (synchronous) or `IAsyncEvent<K>` (asynchronous), and some implement `ICancellable`.
 
 ---
 
 ## Server Events
 
+Located in `com.hypixel.hytale.server.core.event.events`:
+
 ### BootEvent
 
 Fired when the server has fully booted.
 
-**Location:** `com.hypixel.hytale.server.core.event.events.BootEvent`
-
-| Property | Type | Description |
-|----------|------|-------------|
-| - | - | No properties |
+**Implements:** `IEvent<Void>`
 
 ```java
-eventBus.register(BootEvent.class, event -> {
-    logger.info("Server is ready!");
+public class BootEvent implements IEvent<Void> {
+    // No properties
+}
+```
+
+```java
+eventRegistry.register(BootEvent.class, event -> {
+    getLogger().info("Server has booted!");
 });
 ```
 
@@ -41,35 +34,309 @@ eventBus.register(BootEvent.class, event -> {
 
 Fired when the server begins shutdown.
 
-**Location:** `com.hypixel.hytale.server.core.event.events.ShutdownEvent`
-
-| Property | Type | Description |
-|----------|------|-------------|
-| - | - | No properties |
+**Implements:** `IEvent<Void>`
 
 ```java
-eventBus.register(ShutdownEvent.class, event -> {
+public class ShutdownEvent implements IEvent<Void> {
+    public static final short DISCONNECT_PLAYERS = -48;
+    public static final short UNBIND_LISTENERS = -40;
+    public static final short SHUTDOWN_WORLDS = -32;
+}
+```
+
+```java
+eventRegistry.register(ShutdownEvent.class, event -> {
     saveAllData();
 });
 ```
 
-### LoadAssetEvent
+### PrepareUniverseEvent
 
-Fired during asset loading phase.
+Fired during universe preparation.
+
+**Location:** `com.hypixel.hytale.server.core.event.events.PrepareUniverseEvent`
+
+---
+
+## Player Events
+
+Located in `com.hypixel.hytale.server.core.event.events.player`:
+
+### PlayerConnectEvent
+
+Fired when a player connection is established.
+
+**Implements:** `IEvent<Void>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `holder` | `Holder<EntityStore>` | Entity holder for the player |
+| `playerRef` | `PlayerRef` | Player reference |
+| `world` | `World` (nullable) | Target world (can be set) |
+
+```java
+public class PlayerConnectEvent implements IEvent<Void> {
+    public Holder<EntityStore> getHolder();
+    public PlayerRef getPlayerRef();
+    @Nullable public World getWorld();
+    public void setWorld(@Nullable World world);
+    
+    @Deprecated
+    @Nullable public Player getPlayer();  // Use getPlayerRef() instead
+}
+```
+
+```java
+eventRegistry.register(PlayerConnectEvent.class, event -> {
+    PlayerRef playerRef = event.getPlayerRef();
+    getLogger().info("Player connecting: " + playerRef.getUsername());
+});
+```
+
+### PlayerDisconnectEvent
+
+Fired when a player disconnects.
+
+**Extends:** `PlayerRefEvent<Void>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `playerRef` | `PlayerRef` | Player reference (inherited) |
+| `disconnectReason` | `DisconnectReason` | Why the player disconnected |
+
+```java
+public class PlayerDisconnectEvent extends PlayerRefEvent<Void> {
+    @Nonnull public PacketHandler.DisconnectReason getDisconnectReason();
+}
+```
+
+### PlayerReadyEvent
+
+Fired when a player is fully ready (loaded into world).
+
+**Extends:** `PlayerEvent<String>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `ref` | `Ref<EntityStore>` | Entity reference (inherited) |
+| `player` | `Player` | Player entity (inherited) |
+| `readyId` | `int` | Ready identifier |
+
+```java
+public class PlayerReadyEvent extends PlayerEvent<String> {
+    public int getReadyId();
+}
+```
+
+### PlayerChatEvent
+
+Fired when a player sends a chat message.
+
+**Implements:** `IAsyncEvent<String>`, `ICancellable`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sender` | `PlayerRef` | Sending player |
+| `targets` | `List<PlayerRef>` | Message recipients |
+| `content` | `String` | Message content |
+| `formatter` | `Formatter` | Message formatter |
+| `cancelled` | `boolean` | Whether event is cancelled |
+
+```java
+public class PlayerChatEvent implements IAsyncEvent<String>, ICancellable {
+    public static final Formatter DEFAULT_FORMATTER;
+    
+    @Nonnull public PlayerRef getSender();
+    public void setSender(@Nonnull PlayerRef sender);
+    
+    @Nonnull public List<PlayerRef> getTargets();
+    public void setTargets(@Nonnull List<PlayerRef> targets);
+    
+    @Nonnull public String getContent();
+    public void setContent(@Nonnull String content);
+    
+    @Nonnull public Formatter getFormatter();
+    public void setFormatter(@Nonnull Formatter formatter);
+    
+    public boolean isCancelled();
+    public void setCancelled(boolean cancelled);
+    
+    public interface Formatter {
+        @Nonnull Message format(@Nonnull PlayerRef playerRef, @Nonnull String message);
+    }
+}
+```
+
+```java
+// PlayerChatEvent is async - use registerAsync
+eventRegistry.registerAsync(PlayerChatEvent.class, future -> {
+    return future.thenApply(event -> {
+        if (event.getContent().contains("badword")) {
+            event.setCancelled(true);
+        }
+        return event;
+    });
+});
+```
+
+### PlayerInteractEvent
+
+Fired when a player interacts with something.
+
+**Extends:** `PlayerEvent<String>`, **Implements:** `ICancellable`
+
+**Note:** This event is marked `@Deprecated`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `actionType` | `InteractionType` | Type of interaction |
+| `clientUseTime` | `long` | Client-side use time |
+| `itemInHand` | `ItemStack` | Item being used |
+| `targetBlock` | `Vector3i` | Target block position |
+| `targetRef` | `Ref<EntityStore>` | Target entity reference |
+| `targetEntity` | `Entity` | Target entity |
+| `cancelled` | `boolean` | Whether event is cancelled |
+
+```java
+@Deprecated
+public class PlayerInteractEvent extends PlayerEvent<String> implements ICancellable {
+    public InteractionType getActionType();
+    public long getClientUseTime();
+    public ItemStack getItemInHand();
+    public Vector3i getTargetBlock();
+    public Entity getTargetEntity();
+    public Ref<EntityStore> getTargetRef();
+    public boolean isCancelled();
+    public void setCancelled(boolean cancelled);
+}
+```
+
+### PlayerCraftEvent
+
+Fired when a player crafts an item.
+
+**Extends:** `PlayerEvent<String>`
+
+**Note:** This event is marked `@Deprecated(forRemoval = true)`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `craftedRecipe` | `CraftingRecipe` | The recipe used |
+| `quantity` | `int` | Amount crafted |
+
+### AddPlayerToWorldEvent
+
+Fired when a player is added to a world.
+
+**Implements:** `IEvent<String>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `holder` | `Holder<EntityStore>` | Entity holder |
+| `world` | `World` | Target world |
+| `broadcastJoinMessage` | `boolean` | Whether to broadcast join message |
+
+```java
+public class AddPlayerToWorldEvent implements IEvent<String> {
+    @Nonnull public Holder<EntityStore> getHolder();
+    @Nonnull public World getWorld();
+    public boolean shouldBroadcastJoinMessage();
+    public void setBroadcastJoinMessage(boolean broadcastJoinMessage);
+}
+```
+
+### DrainPlayerFromWorldEvent
+
+Fired when a player is removed from a world.
+
+**Location:** `com.hypixel.hytale.server.core.event.events.player.DrainPlayerFromWorldEvent`
+
+### PlayerSetupConnectEvent / PlayerSetupDisconnectEvent
+
+Fired during player connection setup phase.
+
+### PlayerMouseButtonEvent / PlayerMouseMotionEvent
+
+Fired on mouse input events.
+
+---
+
+## Entity Events
+
+Located in `com.hypixel.hytale.server.core.event.events.entity`:
+
+### EntityRemoveEvent
+
+Fired when an entity is removed from the world.
+
+**Location:** `com.hypixel.hytale.server.core.event.events.entity.EntityRemoveEvent`
+
+---
+
+## ECS Events
+
+Located in `com.hypixel.hytale.server.core.event.events.ecs`:
+
+### ChangeGameModeEvent
+
+Fired when a player's game mode changes.
+
+---
+
+## Asset Events
+
+Located in `com.hypixel.hytale.assetstore.event`:
+
+### AssetStoreEvent
+
+Base class for asset store events.
+
+### RegisterAssetStoreEvent
+
+Fired when an asset store registers.
+
+### RemoveAssetStoreEvent
+
+Fired when an asset store is removed.
+
+### GenerateAssetsEvent
+
+Fired during asset generation.
+
+### LoadedAssetsEvent
+
+Fired after assets load.
+
+### RemovedAssetsEvent
+
+Fired after assets are removed.
+
+### AssetMonitorEvent
+
+Fired on asset file changes (hot-reload).
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `path` | `Path` | Changed file path |
+| `eventKind` | `EventKind` | CREATE, MODIFY, or DELETE |
+
+---
+
+## LoadAssetEvent
+
+Fired during the asset loading phase at boot.
 
 **Location:** `com.hypixel.hytale.server.core.asset.LoadAssetEvent`
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `bootStart` | Long | Boot start timestamp |
-| `shouldShutdown` | Boolean | Whether to abort |
-| `reasons` | List<String> | Failure reasons |
+| `bootStart` | `Long` | Boot start timestamp |
+| `shouldShutdown` | `Boolean` | Whether to abort boot |
+| `reasons` | `List<String>` | Failure reasons |
 
 ```java
-eventBus.register(LoadAssetEvent.class, event -> {
-    if (validateAssets()) {
-        // Assets OK
-    } else {
+eventRegistry.register(LoadAssetEvent.class, event -> {
+    if (!validateCustomAssets()) {
         event.setShouldShutdown(true);
         event.addReason("Custom asset validation failed");
     }
@@ -78,640 +345,41 @@ eventBus.register(LoadAssetEvent.class, event -> {
 
 ---
 
-## Player Events
+## Event Base Classes
 
-### PlayerJoinEvent
+### PlayerEvent<K>
 
-Fired when a player joins the server.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Joining player |
-| `world` | World | Spawn world |
-| `position` | Vector3f | Spawn position |
+Base class for player events with entity reference.
 
 ```java
-eventBus.register(PlayerJoinEvent.class, event -> {
-    Player player = event.getPlayer();
-    player.sendMessage("Welcome, " + player.getUsername() + "!");
-});
+public abstract class PlayerEvent<KeyType> implements IEvent<KeyType> {
+    protected final Ref<EntityStore> ref;
+    protected final Player player;
+    
+    @Nonnull public Ref<EntityStore> getRef();
+    @Nonnull public Player getPlayer();
+}
 ```
 
-### PlayerQuitEvent
+### PlayerRefEvent<K>
 
-Fired when a player leaves the server.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Leaving player |
-| `reason` | QuitReason | Why they left |
+Base class for player events with PlayerRef.
 
 ```java
-eventBus.register(PlayerQuitEvent.class, event -> {
-    savePlayerData(event.getPlayer());
-});
+public abstract class PlayerRefEvent<KeyType> implements IEvent<KeyType> {
+    protected final PlayerRef playerRef;
+    
+    @Nonnull public PlayerRef getPlayerRef();
+}
 ```
-
-### PlayerChatEvent
-
-Fired when a player sends a chat message.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Chatting player |
-| `message` | String | Chat message |
-| `cancelled` | Boolean | Cancel message |
-
-**Cancellable:** Yes
-
-```java
-eventBus.register(PlayerChatEvent.class, event -> {
-    // Filter bad words
-    String filtered = filterMessage(event.getMessage());
-    event.setMessage(filtered);
-
-    // Or cancel entirely
-    if (isMuted(event.getPlayer())) {
-        event.setCancelled(true);
-    }
-});
-```
-
-### PlayerMoveEvent
-
-Fired when a player moves.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Moving player |
-| `from` | Location | Previous position |
-| `to` | Location | New position |
-| `cancelled` | Boolean | Cancel movement |
-
-**Cancellable:** Yes
-
-```java
-eventBus.register(PlayerMoveEvent.class, event -> {
-    if (isInRestrictedArea(event.getTo())) {
-        event.setCancelled(true);
-        event.getPlayer().sendMessage("You cannot enter this area!");
-    }
-});
-```
-
-### PlayerTeleportEvent
-
-Fired when a player teleports.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Teleporting player |
-| `from` | Location | Previous position |
-| `to` | Location | Destination |
-| `cause` | TeleportCause | Teleport reason |
-| `cancelled` | Boolean | Cancel teleport |
-
-**Cancellable:** Yes
-
-### PlayerInteractEvent
-
-Fired when a player interacts with something.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Interacting player |
-| `action` | InteractAction | Interaction type |
-| `hand` | Hand | Hand used |
-| `item` | ItemStack | Item in hand |
-| `cancelled` | Boolean | Cancel interaction |
-
-**Cancellable:** Yes
-
-### PlayerRespawnEvent
-
-Fired when a player respawns.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Respawning player |
-| `respawnLocation` | Location | Spawn location |
-| `isBedSpawn` | Boolean | Spawning at bed |
-
----
-
-## Entity Events
-
-### EntitySpawnEvent
-
-Fired when an entity spawns.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Spawned entity |
-| `location` | Location | Spawn location |
-| `reason` | SpawnReason | Why it spawned |
-| `cancelled` | Boolean | Cancel spawn |
-
-**Cancellable:** Yes
-
-```java
-eventBus.register(EntitySpawnEvent.class, event -> {
-    if (event.getEntity().getType().equals("zombie")) {
-        if (isSpawnDisabled(event.getLocation().getWorld())) {
-            event.setCancelled(true);
-        }
-    }
-});
-```
-
-### EntityDespawnEvent
-
-Fired when an entity despawns.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Despawning entity |
-| `reason` | DespawnReason | Why it despawned |
-
-### EntityDamageEvent
-
-Fired when an entity takes damage.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Damaged entity |
-| `damage` | Float | Damage amount |
-| `source` | DamageSource | Damage source |
-| `attacker` | Entity | Attacking entity |
-| `cancelled` | Boolean | Cancel damage |
-
-**Cancellable:** Yes
-
-```java
-eventBus.register(EntityDamageEvent.class, event -> {
-    if (event.getEntity() instanceof Player) {
-        Player player = (Player) event.getEntity();
-        if (isProtected(player)) {
-            event.setCancelled(true);
-        }
-    }
-});
-```
-
-### EntityDeathEvent
-
-Fired when an entity dies.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Dying entity |
-| `killer` | Entity | Killing entity |
-| `drops` | List<ItemStack> | Dropped items |
-| `experience` | Integer | XP dropped |
-
-```java
-eventBus.register(EntityDeathEvent.class, event -> {
-    // Modify drops
-    event.getDrops().add(new ItemStack("bonus_item", 1));
-
-    // Modify experience
-    event.setExperience(event.getExperience() * 2);
-});
-```
-
-### EntityHealEvent
-
-Fired when an entity heals.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Healing entity |
-| `amount` | Float | Heal amount |
-| `reason` | HealReason | Why healing |
-| `cancelled` | Boolean | Cancel healing |
-
-**Cancellable:** Yes
-
-### EntityTargetEvent
-
-Fired when an entity targets another.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Targeting entity |
-| `target` | Entity | New target |
-| `reason` | TargetReason | Why targeting |
-| `cancelled` | Boolean | Cancel targeting |
-
-**Cancellable:** Yes
-
----
-
-## World Events
-
-### WorldLoadEvent
-
-Fired when a world loads.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Loaded world |
-
-### WorldUnloadEvent
-
-Fired when a world unloads.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Unloading world |
-| `cancelled` | Boolean | Cancel unload |
-
-**Cancellable:** Yes
-
-### WorldSaveEvent
-
-Fired when a world saves.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Saving world |
-
-### ChunkLoadEvent
-
-Fired when a chunk loads.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Chunk world |
-| `chunk` | ChunkColumn | Loaded chunk |
-| `isNew` | Boolean | Newly generated |
-
-### ChunkUnloadEvent
-
-Fired when a chunk unloads.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Chunk world |
-| `chunk` | ChunkColumn | Unloading chunk |
-| `save` | Boolean | Should save |
-| `cancelled` | Boolean | Cancel unload |
-
-**Cancellable:** Yes
-
-### ChunkGenerateEvent
-
-Fired when a chunk is generated.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `world` | World | Chunk world |
-| `chunkX` | Integer | Chunk X coordinate |
-| `chunkZ` | Integer | Chunk Z coordinate |
-
----
-
-## Block Events
-
-### BlockBreakEvent
-
-Fired when a block is broken.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Breaking player |
-| `block` | Block | Broken block |
-| `drops` | List<ItemStack> | Block drops |
-| `experience` | Integer | XP dropped |
-| `cancelled` | Boolean | Cancel break |
-
-**Cancellable:** Yes
-
-```java
-eventBus.register(BlockBreakEvent.class, event -> {
-    BlockType type = event.getBlock().getType();
-
-    // Prevent breaking certain blocks
-    if (type.getName().equals("bedrock")) {
-        event.setCancelled(true);
-        event.getPlayer().sendMessage("Cannot break bedrock!");
-    }
-
-    // Modify drops
-    if (type.getName().equals("diamond_ore")) {
-        event.getDrops().add(new ItemStack("bonus_diamond", 1));
-    }
-});
-```
-
-### BlockPlaceEvent
-
-Fired when a block is placed.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Placing player |
-| `block` | Block | Placed block |
-| `placedAgainst` | Block | Adjacent block |
-| `itemInHand` | ItemStack | Item used |
-| `cancelled` | Boolean | Cancel placement |
-
-**Cancellable:** Yes
-
-### BlockInteractEvent
-
-Fired when a player interacts with a block.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Interacting player |
-| `block` | Block | Target block |
-| `action` | Action | Interaction type |
-| `face` | BlockFace | Clicked face |
-| `cancelled` | Boolean | Cancel interaction |
-
-**Cancellable:** Yes
-
-### BlockUpdateEvent
-
-Fired when a block updates.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `block` | Block | Updating block |
-| `cause` | UpdateCause | Update reason |
-
-### BlockPhysicsEvent
-
-Fired for block physics updates.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `block` | Block | Affected block |
-| `sourceBlock` | Block | Cause block |
-| `cancelled` | Boolean | Cancel physics |
-
-**Cancellable:** Yes
-
-### BlockGrowEvent
-
-Fired when a block grows (crops, etc.).
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `block` | Block | Growing block |
-| `newState` | BlockState | New state |
-| `cancelled` | Boolean | Cancel growth |
-
-**Cancellable:** Yes
-
-### BlockSpreadEvent
-
-Fired when a block spreads (fire, grass, etc.).
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `source` | Block | Source block |
-| `block` | Block | Spreading to |
-| `newState` | BlockState | New state |
-| `cancelled` | Boolean | Cancel spread |
-
-**Cancellable:** Yes
-
----
-
-## Inventory Events
-
-### InventoryOpenEvent
-
-Fired when an inventory opens.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Opening player |
-| `inventory` | Inventory | Opened inventory |
-| `cancelled` | Boolean | Cancel open |
-
-**Cancellable:** Yes
-
-### InventoryCloseEvent
-
-Fired when an inventory closes.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Closing player |
-| `inventory` | Inventory | Closed inventory |
-
-### InventoryClickEvent
-
-Fired when clicking in an inventory.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Clicking player |
-| `inventory` | Inventory | Target inventory |
-| `slot` | Integer | Clicked slot |
-| `clickType` | ClickType | Click type |
-| `item` | ItemStack | Clicked item |
-| `cancelled` | Boolean | Cancel click |
-
-**Cancellable:** Yes
-
-### ItemPickupEvent
-
-Fired when picking up an item.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Picking up player |
-| `item` | ItemEntity | Picked item |
-| `remaining` | Integer | Leftover count |
-| `cancelled` | Boolean | Cancel pickup |
-
-**Cancellable:** Yes
-
-### ItemDropEvent
-
-Fired when dropping an item.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Dropping player |
-| `item` | ItemStack | Dropped item |
-| `cancelled` | Boolean | Cancel drop |
-
-**Cancellable:** Yes
-
-### CraftItemEvent
-
-Fired when crafting an item.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Crafting player |
-| `recipe` | Recipe | Used recipe |
-| `result` | ItemStack | Crafted item |
-| `cancelled` | Boolean | Cancel craft |
-
-**Cancellable:** Yes
-
----
-
-## Combat Events
-
-### PlayerAttackEvent
-
-Fired when a player attacks.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Attacking player |
-| `target` | Entity | Attack target |
-| `damage` | Float | Damage dealt |
-| `cancelled` | Boolean | Cancel attack |
-
-**Cancellable:** Yes
-
-### ProjectileLaunchEvent
-
-Fired when a projectile launches.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `entity` | Entity | Shooter entity |
-| `projectile` | Entity | Projectile |
-| `cancelled` | Boolean | Cancel launch |
-
-**Cancellable:** Yes
-
-### ProjectileHitEvent
-
-Fired when a projectile hits.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `projectile` | Entity | Projectile |
-| `hitEntity` | Entity | Hit entity |
-| `hitBlock` | Block | Hit block |
-
-### ExplosionEvent
-
-Fired when an explosion occurs.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `location` | Location | Explosion center |
-| `radius` | Float | Explosion radius |
-| `blocks` | List<Block> | Affected blocks |
-| `entities` | List<Entity> | Affected entities |
-| `cancelled` | Boolean | Cancel explosion |
-
-**Cancellable:** Yes
-
----
-
-## Asset Events
-
-### AssetStoreEvent
-
-Base class for asset store events.
-
-**Location:** `com.hypixel.hytale.assetstore.event.AssetStoreEvent`
-
-### RegisterAssetStoreEvent
-
-Fired when an asset store registers.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `assetStore` | AssetStore | Registered store |
-
-### RemoveAssetStoreEvent
-
-Fired when an asset store is removed.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `assetStore` | AssetStore | Removed store |
-
-### GenerateAssetsEvent
-
-Fired during asset generation.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `parentReference` | ParentReference | Parent asset |
-
-### LoadedAssetsEvent
-
-Fired after assets load.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `assetStore` | AssetStore | Loaded store |
-| `assets` | Collection | Loaded assets |
-
-### RemovedAssetsEvent
-
-Fired after assets are removed.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `assetStore` | AssetStore | Store |
-| `assets` | Collection | Removed assets |
-
-### AssetMonitorEvent
-
-Fired on asset file changes (hot-reload).
-
-**Location:** `com.hypixel.hytale.assetstore.event.AssetMonitorEvent`
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `path` | Path | Changed file |
-| `eventKind` | EventKind | CREATE/MODIFY/DELETE |
-
----
-
-## Network Events
-
-### PacketReceiveEvent
-
-Fired when receiving a packet.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Source player |
-| `packet` | Packet | Received packet |
-| `cancelled` | Boolean | Cancel packet |
-
-**Cancellable:** Yes
-
-### PacketSendEvent
-
-Fired when sending a packet.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `player` | Player | Target player |
-| `packet` | Packet | Sent packet |
-| `cancelled` | Boolean | Cancel packet |
-
-**Cancellable:** Yes
-
-### PlayerConnectionEvent
-
-Fired during connection process.
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `address` | InetAddress | Client address |
-| `state` | ConnectionState | Current state |
 
 ---
 
 ## Event Interfaces
+
+### IBaseEvent<K>
+
+Base event interface with key type parameter.
 
 ### IEvent<K>
 
@@ -719,7 +387,7 @@ Synchronous event interface.
 
 ```java
 public interface IEvent<KeyType> extends IBaseEvent<KeyType> {
-    // Marker interface
+    // Marker interface for sync events
 }
 ```
 
@@ -729,13 +397,13 @@ Asynchronous event interface.
 
 ```java
 public interface IAsyncEvent<KeyType> extends IBaseEvent<KeyType> {
-    // Marker interface
+    // Marker interface for async events
 }
 ```
 
 ### ICancellable
 
-Cancellable event interface.
+Interface for events that can be cancelled.
 
 ```java
 public interface ICancellable {
@@ -752,16 +420,16 @@ Events are handled in priority order:
 
 ```java
 public enum EventPriority {
-    LOWEST((short)-200),   // First to execute
-    LOW((short)-100),
-    NORMAL((short)0),      // Default
-    HIGH((short)100),
-    HIGHEST((short)200),
-    MONITOR((short)300)    // Last, observe only
+    LOWEST,    // First to execute
+    LOW,
+    NORMAL,    // Default
+    HIGH,
+    HIGHEST,
+    MONITOR    // Last - observe only, do NOT modify
 }
 ```
 
-**Important:** MONITOR priority should only observe, never modify events.
+**Important:** `MONITOR` priority handlers should only observe events, never cancel or modify them.
 
 ---
 
@@ -769,4 +437,4 @@ public enum EventPriority {
 
 - [Event System](Event-System) - Event handling documentation
 - [Creating Plugins](Creating-Plugins) - Event registration examples
-- [Example Plugins](Example-Plugins) - Event listener examples
+- [Plugin System](Plugin-System) - Plugin EventRegistry access

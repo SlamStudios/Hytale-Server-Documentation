@@ -1,3 +1,4 @@
+# Creating Plugins
 
 This guide covers how to create custom plugins for the Hytale Server. Plugins allow you to extend server functionality with custom features.
 
@@ -16,34 +17,30 @@ package com.example.myplugin;
 
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
-import com.hypixel.hytale.server.core.plugin.PluginType;
+import java.util.logging.Level;
+import javax.annotation.Nonnull;
 
 public class MyPlugin extends JavaPlugin {
 
-    public MyPlugin(JavaPluginInit init) {
+    public MyPlugin(@Nonnull JavaPluginInit init) {
         super(init);
     }
 
     @Override
-    public PluginType getType() {
-        return PluginType.PLUGIN;
-    }
-
-    @Override
     protected void setup() {
-        getLogger().info("MyPlugin setup!");
+        getLogger().at(Level.INFO).log("MyPlugin setup!");
         // Register commands, events, etc.
     }
 
     @Override
     protected void start() {
-        getLogger().info("MyPlugin started!");
+        getLogger().at(Level.INFO).log("MyPlugin started!");
         // Start background tasks, etc.
     }
 
     @Override
     protected void shutdown() {
-        getLogger().info("MyPlugin shutting down!");
+        getLogger().at(Level.INFO).log("MyPlugin shutting down!");
         // Cleanup resources
     }
 }
@@ -55,13 +52,19 @@ Create `plugin.json` in your JAR root:
 
 ```json
 {
-    "name": "MyPlugin",
-    "group": "com.example",
-    "version": "1.0.0",
-    "main": "com.example.myplugin.MyPlugin",
-    "description": "My awesome plugin",
-    "authors": ["YourName"],
-    "dependencies": []
+    "Group": "com.example",
+    "Name": "MyPlugin",
+    "Version": "1.0.0",
+    "Main": "com.example.myplugin.MyPlugin",
+    "Description": "My awesome plugin",
+    "Authors": [
+        {
+            "Name": "YourName"
+        }
+    ],
+    "ServerVersion": ">=0.0.1",
+    "DisabledByDefault": false,
+    "IncludesAssetPack": false
 }
 ```
 
@@ -97,22 +100,37 @@ my-plugin/
 ### Define Config Class
 
 ```java
+package com.example.myplugin;
+
+import com.hypixel.hytale.codec.Codec;
+import com.hypixel.hytale.codec.KeyedCodec;
+import com.hypixel.hytale.codec.builder.BuilderCodec;
+import javax.annotation.Nonnull;
+
 public class MyConfig {
-    public static final BuilderCodec<MyConfig> CODEC = BuilderCodec.builder(MyConfig.class)
-        .with("enabled", Codec.BOOLEAN, MyConfig::isEnabled, MyConfig.Builder::enabled)
-        .with("message", Codec.STRING, MyConfig::getMessage, MyConfig.Builder::message)
-        .with("maxValue", Codec.INT, MyConfig::getMaxValue, MyConfig.Builder::maxValue)
-        .withDefault(MyConfig.Builder::new)
+
+    @Nonnull
+    public static final BuilderCodec<MyConfig> CODEC = BuilderCodec
+        .builder(MyConfig.class, Builder::new)
+        .append(new KeyedCodec<>("enabled", Codec.BOOLEAN),
+                (cfg, val) -> {}, MyConfig::isEnabled)
+        .add()
+        .append(new KeyedCodec<>("message", Codec.STRING),
+                (cfg, val) -> {}, MyConfig::getMessage)
+        .add()
+        .append(new KeyedCodec<>("maxValue", Codec.INT),
+                (cfg, val) -> {}, MyConfig::getMaxValue)
+        .add()
         .build();
 
     private final boolean enabled;
     private final String message;
     private final int maxValue;
 
-    private MyConfig(boolean enabled, String message, int maxValue) {
-        this.enabled = enabled;
-        this.message = message;
-        this.maxValue = maxValue;
+    private MyConfig(Builder builder) {
+        this.enabled = builder.enabled;
+        this.message = builder.message;
+        this.maxValue = builder.maxValue;
     }
 
     public boolean isEnabled() { return enabled; }
@@ -124,23 +142,8 @@ public class MyConfig {
         private String message = "Default message";
         private int maxValue = 100;
 
-        public Builder enabled(boolean enabled) {
-            this.enabled = enabled;
-            return this;
-        }
-
-        public Builder message(String message) {
-            this.message = message;
-            return this;
-        }
-
-        public Builder maxValue(int maxValue) {
-            this.maxValue = maxValue;
-            return this;
-        }
-
         public MyConfig build() {
-            return new MyConfig(enabled, message, maxValue);
+            return new MyConfig(this);
         }
     }
 }
@@ -152,9 +155,9 @@ public class MyConfig {
 public class MyPlugin extends JavaPlugin {
     private Config<MyConfig> config;
 
-    public MyPlugin(JavaPluginInit init) {
+    public MyPlugin(@Nonnull JavaPluginInit init) {
         super(init);
-        // Must be before setup()
+        // Must be called in constructor, before setup()
         config = withConfig("config", MyConfig.CODEC);
     }
 
@@ -162,10 +165,10 @@ public class MyPlugin extends JavaPlugin {
     protected void setup() {
         MyConfig cfg = config.get();
         if (!cfg.isEnabled()) {
-            getLogger().info("Plugin disabled by config");
+            getLogger().at(Level.INFO).log("Plugin disabled by config");
             return;
         }
-        getLogger().info("Message: " + cfg.getMessage());
+        getLogger().at(Level.INFO).log("Message: %s", cfg.getMessage());
     }
 }
 ```
@@ -184,87 +187,116 @@ Created automatically in `plugins/MyPlugin/config.json`:
 
 ## Commands
 
-### Create Command
+See [Command System](Command-System) for full documentation.
+
+### Simple Command (CommandBase)
+
+Use `CommandBase` for synchronous commands:
 
 ```java
-public class MyCommand implements Command {
-    private final MyPlugin plugin;
+package com.example.myplugin.commands;
 
-    public MyCommand(MyPlugin plugin) {
-        this.plugin = plugin;
+import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.command.system.CommandContext;
+import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
+import javax.annotation.Nonnull;
+
+public class InfoCommand extends CommandBase {
+
+    public InfoCommand() {
+        super("info", "myplugin.commands.info.description");
+        addAliases("serverinfo");
     }
 
     @Override
-    public String getName() {
-        return "mycommand";
-    }
-
-    @Override
-    public String[] getAliases() {
-        return new String[]{"mc"};
-    }
-
-    @Override
-    public String getDescription() {
-        return "My custom command";
-    }
-
-    @Override
-    public String getUsage() {
-        return "/mycommand <action> [args...]";
-    }
-
-    @Override
-    public String getPermission() {
-        return "myplugin.command";
-    }
-
-    @Override
-    public void execute(CommandSender sender, String[] args) {
-        if (args.length == 0) {
-            sender.sendMessage("Usage: " + getUsage());
-            return;
-        }
-
-        switch (args[0].toLowerCase()) {
-            case "info":
-                sender.sendMessage("MyPlugin v1.0.0");
-                break;
-            case "reload":
-                if (sender.hasPermission("myplugin.reload")) {
-                    plugin.reload();
-                    sender.sendMessage("Config reloaded!");
-                } else {
-                    sender.sendMessage("No permission!");
-                }
-                break;
-            default:
-                sender.sendMessage("Unknown action: " + args[0]);
-        }
-    }
-
-    @Override
-    public List<String> tabComplete(CommandSender sender, String[] args) {
-        if (args.length == 1) {
-            return List.of("info", "reload").stream()
-                .filter(s -> s.startsWith(args[0].toLowerCase()))
-                .collect(Collectors.toList());
-        }
-        return Collections.emptyList();
+    protected void executeSync(@Nonnull CommandContext context) {
+        Runtime runtime = Runtime.getRuntime();
+        long usedMB = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024;
+        long maxMB = runtime.maxMemory() / 1024 / 1024;
+        
+        context.sendMessage(Message.raw("Memory: " + usedMB + "MB / " + maxMB + "MB"));
+        context.sendMessage(Message.raw("Java: " + System.getProperty("java.version")));
     }
 }
 ```
 
-### Register Command
+### Command with Arguments (AbstractCommand)
+
+Use `AbstractCommand` for commands with typed arguments:
+
+```java
+package com.example.myplugin.commands;
+
+import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.command.system.AbstractCommand;
+import com.hypixel.hytale.server.core.command.system.CommandContext;
+import com.hypixel.hytale.server.core.command.system.arguments.system.RequiredArg;
+import com.hypixel.hytale.server.core.command.system.arguments.system.DefaultArg;
+import com.hypixel.hytale.server.core.command.system.arguments.types.ArgTypes;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+public class GiveCommand extends AbstractCommand {
+
+    @Nonnull
+    private final RequiredArg<UUID> playerArg;
+    
+    @Nonnull
+    private final RequiredArg<String> itemArg;
+    
+    @Nonnull
+    private final DefaultArg<Integer> amountArg;
+
+    public GiveCommand() {
+        super("give", "myplugin.commands.give.description");
+        
+        this.playerArg = withRequiredArg("player", 
+            "myplugin.commands.give.player.description", 
+            ArgTypes.PLAYER_UUID);
+            
+        this.itemArg = withRequiredArg("item", 
+            "myplugin.commands.give.item.description", 
+            ArgTypes.STRING);
+            
+        this.amountArg = withDefaultArg("amount", 
+            "myplugin.commands.give.amount.description", 
+            ArgTypes.POSITIVE_INTEGER, 
+            1,      // default value
+            "1");   // default display
+        
+        requirePermission("myplugin.command.give");
+    }
+
+    @Override
+    @Nullable
+    protected CompletableFuture<Void> execute(@Nonnull CommandContext context) {
+        UUID targetUuid = context.get(playerArg);
+        String itemName = context.get(itemArg);
+        int amount = context.get(amountArg);
+
+        // Implementation here
+        context.sendMessage(Message.raw("Giving " + amount + "x " + itemName));
+        
+        return null;
+    }
+}
+```
+
+### Register Commands
 
 ```java
 @Override
 protected void setup() {
-    getCommandRegistry().register(new MyCommand(this));
+    getCommandRegistry().registerCommand(new InfoCommand());
+    getCommandRegistry().registerCommand(new GiveCommand());
 }
 ```
 
 ## Events
+
+See [Event System](Event-System) and [Event Types](Event-Types) for full documentation.
 
 ### Listen to Events
 
@@ -273,23 +305,44 @@ protected void setup() {
 protected void setup() {
     EventRegistry events = getEventRegistry();
 
-    // Simple listener
-    events.register(PlayerJoinEvent.class, this::onPlayerJoin);
+    // Server lifecycle events
+    events.register(BootEvent.class, this::onBoot);
+    events.register(ShutdownEvent.class, this::onShutdown);
 
-    // With priority
-    events.register(EventPriority.HIGH, BlockBreakEvent.class, this::onBlockBreak);
-
-    // Global listener (all keys)
-    events.registerGlobal(SomeKeyedEvent.class, this::onAnyEvent);
+    // Player events (synchronous)
+    events.register(PlayerConnectEvent.class, this::onPlayerConnect);
+    events.register(PlayerDisconnectEvent.class, this::onPlayerDisconnect);
+    
+    // Async events require registerAsync
+    events.registerAsync(PlayerChatEvent.class, future -> {
+        return future.thenApply(event -> {
+            onPlayerChat(event);
+            return event;
+        });
+    });
 }
 
-private void onPlayerJoin(PlayerJoinEvent event) {
-    Player player = event.getPlayer();
-    player.sendMessage("Welcome, " + player.getUsername() + "!");
+private void onBoot(BootEvent event) {
+    getLogger().at(Level.INFO).log("Server booted!");
 }
 
-private void onBlockBreak(BlockBreakEvent event) {
-    if (shouldPrevent(event)) {
+private void onShutdown(ShutdownEvent event) {
+    getLogger().at(Level.INFO).log("Server shutting down!");
+}
+
+private void onPlayerConnect(PlayerConnectEvent event) {
+    PlayerRef playerRef = event.getPlayerRef();
+    getLogger().at(Level.INFO).log("Player connecting: %s", playerRef.getUsername());
+}
+
+private void onPlayerDisconnect(PlayerDisconnectEvent event) {
+    PlayerRef playerRef = event.getPlayerRef();
+    getLogger().at(Level.INFO).log("Player disconnected: %s", playerRef.getUsername());
+}
+
+private void onPlayerChat(PlayerChatEvent event) {
+    // PlayerChatEvent implements ICancellable
+    if (event.getContent().contains("badword")) {
         event.setCancelled(true);
     }
 }
@@ -298,19 +351,22 @@ private void onBlockBreak(BlockBreakEvent event) {
 ### Create Custom Events
 
 ```java
+package com.example.myplugin.events;
+
+import com.hypixel.hytale.event.IEvent;
+import com.hypixel.hytale.event.ICancellable;
+import javax.annotation.Nonnull;
+
 public class MyCustomEvent implements IEvent<Void>, ICancellable {
-    private final Player player;
-    private String customData;
+    private final String data;
     private boolean cancelled;
 
-    public MyCustomEvent(Player player, String customData) {
-        this.player = player;
-        this.customData = customData;
+    public MyCustomEvent(@Nonnull String data) {
+        this.data = data;
     }
 
-    public Player getPlayer() { return player; }
-    public String getCustomData() { return customData; }
-    public void setCustomData(String data) { this.customData = data; }
+    @Nonnull
+    public String getData() { return data; }
 
     @Override
     public boolean isCancelled() { return cancelled; }
@@ -323,7 +379,9 @@ public class MyCustomEvent implements IEvent<Void>, ICancellable {
 ### Dispatch Events
 
 ```java
-MyCustomEvent event = new MyCustomEvent(player, "data");
+import com.hypixel.hytale.server.core.HytaleServer;
+
+MyCustomEvent event = new MyCustomEvent("some data");
 HytaleServer.get().getEventBus()
     .dispatchFor(MyCustomEvent.class)
     .dispatch(event);
@@ -333,122 +391,22 @@ if (!event.isCancelled()) {
 }
 ```
 
-## Scheduled Tasks
-
-```java
-@Override
-protected void setup() {
-    TaskRegistry tasks = getTaskRegistry();
-
-    // Repeating task
-    tasks.scheduleRepeating(this::doPeriodicWork, 20, 20); // Every second (20 ticks)
-
-    // Delayed task
-    tasks.scheduleDelayed(this::doLaterWork, 100); // 5 seconds later
-}
-
-private void doPeriodicWork() {
-    // Called every tick interval
-}
-
-private void doLaterWork() {
-    // Called once after delay
-}
-```
-
-## Entity Components
-
-### Register Component
-
-```java
-public class MyComponent implements Component {
-    private int value;
-
-    public int getValue() { return value; }
-    public void setValue(int value) { this.value = value; }
-}
-
-// In plugin
-ComponentType<MyComponent> MY_COMPONENT;
-
-@Override
-protected void setup() {
-    MY_COMPONENT = getEntityRegistry().registerComponent(
-        MyComponent.class,
-        MyComponent::new
-    );
-}
-```
-
-### Use Component
-
-```java
-// Add to entity
-entity.addComponent(MY_COMPONENT, new MyComponent());
-
-// Get from entity
-MyComponent comp = entity.getComponent(MY_COMPONENT);
-if (comp != null) {
-    int value = comp.getValue();
-}
-
-// Remove from entity
-entity.removeComponent(MY_COMPONENT);
-```
-
-## Block States
-
-```java
-public class MyBlockState implements TickableBlockState {
-    public static final Codec<MyBlockState> CODEC = // ...
-
-    private int counter;
-
-    @Override
-    public void onTick(World world, int x, int y, int z) {
-        counter++;
-        if (counter >= 100) {
-            // Do something
-            counter = 0;
-        }
-    }
-}
-
-// Register
-@Override
-protected void setup() {
-    getBlockStateRegistry().register(MyBlockState.class, MyBlockState.CODEC);
-}
-```
-
-## Assets
-
-### Register Asset Type
-
-```java
-public class MyAsset extends JsonAsset<String> {
-    public static final AssetCodec<MyAsset> CODEC = // ...
-
-    private String property;
-
-    // Getters, etc.
-}
-
-@Override
-protected void setup() {
-    getAssetRegistry().register("my_asset", MyAsset.class, MyAsset.CODEC);
-}
-```
-
 ## Logging
 
 ```java
+import com.hypixel.hytale.logger.HytaleLogger;
+import java.util.logging.Level;
+
 private void someMethod() {
     HytaleLogger logger = getLogger();
 
-    logger.info("Info message");
-    logger.warning("Warning message");
-    logger.severe("Error message");
+    // Simple logging
+    logger.at(Level.INFO).log("Info message");
+    logger.at(Level.WARNING).log("Warning message");
+    logger.at(Level.SEVERE).log("Error message");
+
+    // With formatting
+    logger.at(Level.INFO).log("Player %s connected from %s", playerName, address);
 
     // With exception
     try {
@@ -456,9 +414,6 @@ private void someMethod() {
     } catch (Exception e) {
         logger.at(Level.SEVERE).withCause(e).log("Failed to do something");
     }
-
-    // With formatting
-    logger.info("Player %s joined from %s", playerName, address);
 }
 ```
 
@@ -484,7 +439,7 @@ In `plugin.json`:
 
 ```json
 {
-    "dependencies": ["RequiredPlugin", "AnotherPlugin"]
+    "Dependencies": ["RequiredPlugin", "AnotherPlugin"]
 }
 ```
 
@@ -506,74 +461,16 @@ protected void start() {
 
 1. **Use registries** - Automatic cleanup on disable
 2. **Handle errors** - Don't crash the server
-3. **Log appropriately** - Not too verbose, not too quiet
+3. **Log appropriately** - Use Level.INFO for normal messages, Level.FINE for debug
 4. **Check state** - Before accessing other plugins
 5. **Clean up** - In shutdown() method
-6. **Use async** - For blocking operations
-7. **Validate input** - Security first
-8. **Document** - Commands, permissions, config
+6. **Validate input** - Security first
+7. **Document** - Commands, permissions, config
 
-## Example: Complete Plugin
+## See Also
 
-```java
-package com.example.welcomeplugin;
-
-import com.hypixel.hytale.server.core.plugin.*;
-import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.event.*;
-import java.util.logging.Level;
-
-public class WelcomePlugin extends JavaPlugin {
-    private Config<WelcomeConfig> config;
-
-    public WelcomePlugin(JavaPluginInit init) {
-        super(init);
-        config = withConfig("config", WelcomeConfig.CODEC);
-    }
-
-    @Override
-    public PluginType getType() {
-        return PluginType.PLUGIN;
-    }
-
-    @Override
-    protected void setup() {
-        // Register events
-        getEventRegistry().register(PlayerJoinEvent.class, this::onJoin);
-        getEventRegistry().register(PlayerQuitEvent.class, this::onQuit);
-
-        // Register commands
-        getCommandRegistry().register(new WelcomeCommand(this));
-
-        getLogger().info("WelcomePlugin setup complete");
-    }
-
-    @Override
-    protected void start() {
-        getLogger().info("WelcomePlugin started with message: " +
-            config.get().getWelcomeMessage());
-    }
-
-    @Override
-    protected void shutdown() {
-        getLogger().info("WelcomePlugin shutting down");
-    }
-
-    private void onJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        String message = config.get().getWelcomeMessage()
-            .replace("{player}", player.getUsername());
-        player.sendMessage(message);
-    }
-
-    private void onQuit(PlayerQuitEvent event) {
-        if (config.get().isAnnounceQuit()) {
-            // Announce to server
-        }
-    }
-
-    public WelcomeConfig getConfig() {
-        return config.get();
-    }
-}
-```
+- [Plugin System](Plugin-System) - Plugin architecture details
+- [Event System](Event-System) - Event handling documentation
+- [Event Types](Event-Types) - Available event types
+- [Command System](Command-System) - Command system documentation
+- [Example Plugins](Example-Plugins) - Complete working examples

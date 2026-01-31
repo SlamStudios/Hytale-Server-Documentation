@@ -290,6 +290,14 @@ World generation.
 - Biome placement
 - Structure generation
 
+### HytaleGeneratorPlugin
+`com.hypixel.hytale.builtin.hytalegenerator`
+
+Hytale-specific world generation features.
+- Custom terrain features
+- Hytale biomes
+- Specialized structures
+
 ## Movement Plugins
 
 ### CrouchSlidePlugin

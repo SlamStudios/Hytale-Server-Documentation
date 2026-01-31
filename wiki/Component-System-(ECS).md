@@ -1,3 +1,4 @@
+# Component System (ECS)
 
 The Hytale Server uses an Entity Component System (ECS) architecture for game entities. This document covers the component system design and usage.
 
@@ -5,394 +6,632 @@ The Hytale Server uses an Entity Component System (ECS) architecture for game en
 
 The ECS is implemented in `com.hypixel.hytale.component` and follows the standard ECS pattern:
 
-- **Entity**: A unique identifier (ID)
+- **Entity**: A unique reference (`Ref`) pointing to component data
 - **Component**: Pure data attached to entities
 - **System**: Logic that processes entities with specific components
+- **Archetype**: Template defining entity component composition
 
 ## Architecture
 
 ```
 ComponentRegistry
 ├── Component Types
-│   ├── Component (data class)
-│   └── ComponentType (metadata)
-├── Resources
-│   ├── Resource (shared data)
-│   └── ResourceType (metadata)
+│   ├── Component<ECS_TYPE> (data interface)
+│   └── ComponentType<ECS_TYPE, T> (metadata + query)
+├── Store<ECS_TYPE>
+│   ├── ArchetypeChunk (contiguous entity storage)
+│   ├── CommandBuffer (deferred operations)
+│   └── ParallelTask (parallel processing)
 ├── Systems
 │   ├── TickingSystem (per-tick processing)
-│   ├── EventSystem (event-driven processing)
-│   └── DataSystem (data management)
+│   ├── EntityTickingSystem (per-entity per-tick)
+│   ├── ArchetypeTickingSystem (per-archetype processing)
+│   ├── EntityEventSystem (entity events)
+│   └── WorldEventSystem (world events)
 ├── Archetypes
-│   ├── Archetype (entity template)
-│   └── ArchetypeChunk (entity storage)
-└── Queries
-    └── Query (entity selection)
+│   └── Archetype<ECS_TYPE> (implements Query)
+├── Queries
+│   ├── Query<ECS_TYPE> (interface)
+│   ├── AndQuery / OrQuery / NotQuery
+│   └── ExactArchetypeQuery
+└── Resources
+    └── Resource<ECS_TYPE> (shared data)
 ```
 
 ## Key Classes
 
-### Core
-
 | Class | Description |
 |-------|-------------|
-| `ComponentRegistry` | Central registry for components/systems |
-| `Component` | Base interface for components |
-| `ComponentType` | Metadata for component types |
-| `Archetype` | Entity template (component composition) |
-| `ArchetypeChunk` | Contiguous entity storage |
-| `Ref` | Entity reference |
-| `Holder` | Strong entity reference |
+| `ComponentRegistry<ECS_TYPE>` | Central registry for components/systems |
+| `Component<ECS_TYPE>` | Base interface for components |
+| `ComponentType<ECS_TYPE, T>` | Metadata for component types, also a Query |
+| `Archetype<ECS_TYPE>` | Entity template (component composition), also a Query |
+| `ArchetypeChunk<ECS_TYPE>` | Contiguous entity storage |
+| `Ref<ECS_TYPE>` | Entity reference |
+| `Holder<ECS_TYPE>` | Entity holder with components (for creation/transfer) |
+| `Store<ECS_TYPE>` | Entity storage and system execution |
+| `CommandBuffer<ECS_TYPE>` | Deferred operations buffer |
 
-### Systems
+---
 
-| Class | Description |
-|-------|-------------|
-| `ISystem` | Base system interface |
-| `System` | Abstract system base |
-| `TickingSystem` | Per-tick processing |
-| `EntityTickingSystem` | Per-entity per-tick |
-| `ArchetypeTickingSystem` | Per-archetype processing |
-| `EventSystem` | Event-driven systems |
-| `EntityEventSystem` | Per-entity event handling |
-| `WorldEventSystem` | World-level events |
+## Defining Components
 
-### Queries
-
-| Class | Description |
-|-------|-------------|
-| `Query` | Base query interface |
-| `AndQuery` | Requires all components |
-| `OrQuery` | Requires any component |
-| `NotQuery` | Excludes components |
-| `AnyQuery` | Matches any entity |
-| `ExactArchetypeQuery` | Exact archetype match |
-
-### Spatial
-
-| Class | Description |
-|-------|-------------|
-| `SpatialStructure` | Spatial indexing |
-| `SpatialSystem` | Spatial queries |
-| `KDTree` | K-D tree implementation |
-| `MortonCode` | Z-order curve encoding |
-
-## Component Lifecycle
-
-### Creation
+Components are pure data classes implementing the `Component<ECS_TYPE>` interface:
 
 ```java
-// Define a component
-public class HealthComponent implements Component {
+public class HealthComponent implements Component<EntityStore> {
     private float health;
     private float maxHealth;
-
+    
+    public HealthComponent() {
+        this.health = 20.0f;
+        this.maxHealth = 20.0f;
+    }
+    
     public float getHealth() { return health; }
     public void setHealth(float health) { this.health = health; }
     public float getMaxHealth() { return maxHealth; }
     public void setMaxHealth(float maxHealth) { this.maxHealth = maxHealth; }
-}
-
-// Register component type
-ComponentType<HealthComponent> HEALTH_TYPE =
-    registry.registerComponent(HealthComponent.class, HealthComponent::new);
-```
-
-### Adding Components
-
-```java
-// Add component to entity
-entity.addComponent(HEALTH_TYPE, healthComponent);
-
-// Or via CommandBuffer for deferred execution
-commandBuffer.addComponent(entityRef, HEALTH_TYPE, healthComponent);
-```
-
-### Removing Components
-
-```java
-// Remove component
-entity.removeComponent(HEALTH_TYPE);
-
-// Via CommandBuffer
-commandBuffer.removeComponent(entityRef, HEALTH_TYPE);
-```
-
-## Archetypes
-
-Archetypes define the component composition of entities:
-
-```java
-// Create archetype with specific components
-Archetype playerArchetype = registry.getArchetype(
-    POSITION_TYPE,
-    ROTATION_TYPE,
-    HEALTH_TYPE,
-    INVENTORY_TYPE,
-    PLAYER_DATA_TYPE
-);
-
-// Create entity with archetype
-Ref entity = registry.createEntity(playerArchetype);
-```
-
-### Archetype Chunks
-
-Entities with the same archetype are stored in contiguous memory chunks for cache efficiency:
-
-```
-ArchetypeChunk
-├── Entity IDs: [0, 1, 2, 3, ...]
-├── Position[]: [pos0, pos1, pos2, pos3, ...]
-├── Health[]:   [hp0,  hp1,  hp2,  hp3,  ...]
-└── ...
-```
-
-## Systems
-
-### Ticking System
-
-Processes entities each tick:
-
-```java
-public class DamageOverTimeSystem extends EntityTickingSystem {
-    private final ComponentType<HealthComponent> healthType;
-    private final ComponentType<DotComponent> dotType;
-
+    
     @Override
-    public Query getQuery() {
-        return Query.and(healthType, dotType);
-    }
-
-    @Override
-    public void tick(Ref entity, float deltaTime) {
-        HealthComponent health = entity.get(healthType);
-        DotComponent dot = entity.get(dotType);
-
-        health.setHealth(health.getHealth() - dot.getDamage() * deltaTime);
+    @Nonnull
+    public Component<EntityStore> clone() {
+        HealthComponent copy = new HealthComponent();
+        copy.health = this.health;
+        copy.maxHealth = this.maxHealth;
+        return copy;
     }
 }
 ```
 
-### Event System
+### Registering Components in a System
 
-Responds to ECS events:
+Components are typically registered within a System class:
 
 ```java
-public class DeathSystem extends EntityEventSystem<DeathEvent> {
+public class HealthSystem extends EntityTickingSystem<EntityStore> {
+    
+    // Register component type - this is the handle used to access the component
+    private final ComponentType<EntityStore, HealthComponent> healthType = 
+        registerComponent(HealthComponent.class, HealthComponent::new);
+    
+    // With serialization codec for persistence
+    private final ComponentType<EntityStore, HealthComponent> healthType = 
+        registerComponent(HealthComponent.class, "Health", HealthComponent.CODEC);
+    
     @Override
-    public void onEvent(Ref entity, DeathEvent event) {
-        // Handle entity death
-        dropLoot(entity);
-        playDeathAnimation(entity);
-        scheduleRemoval(entity);
+    public Query<EntityStore> getQuery() {
+        // healthType itself IS a Query (checks if entity has this component)
+        return healthType;
     }
-}
-```
-
-### Archetype System
-
-Processes all entities of an archetype at once:
-
-```java
-public class PhysicsSystem extends ArchetypeTickingSystem {
+    
     @Override
-    public void tick(ArchetypeChunk chunk, float deltaTime) {
-        Position[] positions = chunk.getArray(positionType);
-        Velocity[] velocities = chunk.getArray(velocityType);
-
-        for (int i = 0; i < chunk.getCount(); i++) {
-            positions[i].add(velocities[i].mul(deltaTime));
+    public void tick(float dt, int index, 
+                     @Nonnull ArchetypeChunk<EntityStore> chunk,
+                     @Nonnull Store<EntityStore> store,
+                     @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        // Get component from chunk at index
+        HealthComponent health = chunk.getComponent(healthType, index);
+        
+        // Process health regeneration
+        if (health.getHealth() < health.getMaxHealth()) {
+            health.setHealth(Math.min(health.getHealth() + dt, health.getMaxHealth()));
         }
     }
 }
 ```
 
+---
+
+## Entity References (Ref)
+
+Entities are referenced using `Ref<ECS_TYPE>`:
+
+```java
+Ref<EntityStore> entityRef;
+
+// Check if reference is still valid
+if (entityRef.isValid()) {
+    // Use reference
+    Store<EntityStore> store = entityRef.getStore();
+    int index = entityRef.getIndex();
+}
+
+// Validate (throws if invalid)
+entityRef.validate();
+```
+
+---
+
+## Entity Holders
+
+`Holder<ECS_TYPE>` is used when creating entities or transferring them:
+
+```java
+// Create a new holder from the registry
+Holder<EntityStore> holder = registry.newHolder();
+
+// Add components to holder
+holder.addComponent(healthType, new HealthComponent());
+holder.addComponent(positionType, new PositionComponent());
+
+// Or ensure component exists (creates with default if missing)
+holder.ensureComponent(healthType);
+
+// Get component from holder
+HealthComponent health = holder.getComponent(healthType);
+
+// Put component (add or replace)
+holder.putComponent(healthType, newHealth);
+
+// Remove component
+holder.removeComponent(healthType);
+
+// Clone the holder
+Holder<EntityStore> copy = holder.clone();
+```
+
+---
+
+## Archetypes
+
+Archetypes define the component composition of entities and also serve as queries:
+
+```java
+// Create archetype with specific components
+Archetype<EntityStore> playerArchetype = Archetype.of(
+    positionType,
+    rotationType,
+    healthType,
+    inventoryType,
+    playerDataType
+);
+
+// Check if archetype contains a component type
+boolean hasHealth = playerArchetype.contains(healthType);
+
+// Archetypes ARE queries - use directly
+Query<EntityStore> query = playerArchetype;  // Matches entities with ALL these components
+
+// Add component to archetype (creates new archetype)
+Archetype<EntityStore> newArchetype = Archetype.add(playerArchetype, effectsType);
+
+// Remove component from archetype
+Archetype<EntityStore> reducedArchetype = Archetype.remove(playerArchetype, inventoryType);
+```
+
+---
+
 ## Queries
 
-### Basic Queries
+Queries select entities based on component criteria. `ComponentType` and `Archetype` both implement `Query`.
+
+### Using ComponentType as Query
+
+```java
+// A single ComponentType IS a query - matches entities that have this component
+Query<EntityStore> query = healthType;
+```
+
+### Query Combinators
 
 ```java
 // All entities with Health AND Position
-Query query = Query.and(HEALTH_TYPE, POSITION_TYPE);
+Query<EntityStore> query = Query.and(healthType, positionType);
 
 // All entities with Health OR Shield
-Query query = Query.or(HEALTH_TYPE, SHIELD_TYPE);
+Query<EntityStore> query = Query.or(healthType, shieldType);
 
 // All entities with Health but NOT Invincible
-Query query = Query.and(HEALTH_TYPE, Query.not(INVINCIBLE_TYPE));
+Query<EntityStore> query = Query.and(healthType, Query.not(invincibleType));
+
+// Match any entity
+Query<EntityStore> anyQuery = Query.any();
+
+// Exact archetype match (must have exactly these components, no more)
+Query<EntityStore> exactQuery = playerArchetype.asExactQuery();
 ```
 
-### Query Execution
+### Query in Systems
 
 ```java
-// Iterate matching entities
-registry.query(query).forEach(entity -> {
-    // Process entity
-});
-
-// With components
-registry.query(query).forEach((entity, health, position) -> {
-    // Process with direct component access
-});
-```
-
-## Dependencies
-
-Systems can declare dependencies for ordering:
-
-```java
-public class MySystem extends TickingSystem {
+public class DamageOverTimeSystem extends EntityTickingSystem<EntityStore> {
+    private final ComponentType<EntityStore, HealthComponent> healthType;
+    private final ComponentType<EntityStore, DotComponent> dotType;
+    
     @Override
-    public List<Dependency> getDependencies() {
-        return List.of(
-            Dependency.after(PhysicsSystem.class),
-            Dependency.before(RenderSystem.class)
-        );
+    public Query<EntityStore> getQuery() {
+        // Process entities that have BOTH Health AND DoT components
+        return Query.and(healthType, dotType);
+    }
+    
+    @Override
+    public void tick(float dt, int index, 
+                     @Nonnull ArchetypeChunk<EntityStore> chunk,
+                     @Nonnull Store<EntityStore> store,
+                     @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        HealthComponent health = chunk.getComponent(healthType, index);
+        DotComponent dot = chunk.getComponent(dotType, index);
+        
+        health.setHealth(health.getHealth() - dot.getDamage() * dt);
     }
 }
 ```
 
-### Dependency Types
+---
 
-| Type | Description |
-|------|-------------|
-| `SystemDependency` | Depends on specific system |
-| `SystemTypeDependency` | Depends on system type |
-| `SystemGroupDependency` | Depends on system group |
-| `RootDependency` | Special root dependency |
+## Systems
 
-### Ordering
+### TickingSystem
+
+Base class for systems that run every tick:
 
 ```java
-public enum Order {
-    BEFORE,  // Run before dependency
-    AFTER    // Run after dependency
-}
-
-public enum OrderPriority {
-    SOFT,    // Preference
-    HARD     // Requirement
+public abstract class TickingSystem<ECS_TYPE> extends System<ECS_TYPE> 
+        implements TickableSystem<ECS_TYPE> {
+    
+    // Called every tick with delta time, system index, and store
+    public abstract void tick(float dt, int systemIndex, @Nonnull Store<ECS_TYPE> store);
 }
 ```
+
+### ArchetypeTickingSystem
+
+Processes matching archetype chunks:
+
+```java
+public class PhysicsSystem extends ArchetypeTickingSystem<EntityStore> {
+    private final ComponentType<EntityStore, PositionComponent> positionType;
+    private final ComponentType<EntityStore, VelocityComponent> velocityType;
+    
+    @Override
+    public Query<EntityStore> getQuery() {
+        return Query.and(positionType, velocityType);
+    }
+    
+    @Override
+    public void tick(float dt, 
+                     @Nonnull ArchetypeChunk<EntityStore> chunk,
+                     @Nonnull Store<EntityStore> store,
+                     @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        // Process all entities in this chunk
+        int size = chunk.size();
+        for (int i = 0; i < size; i++) {
+            PositionComponent pos = chunk.getComponent(positionType, i);
+            VelocityComponent vel = chunk.getComponent(velocityType, i);
+            
+            pos.add(vel.getX() * dt, vel.getY() * dt, vel.getZ() * dt);
+        }
+    }
+}
+```
+
+### EntityTickingSystem
+
+Processes entities one at a time (simpler API):
+
+```java
+public class HealthRegenSystem extends EntityTickingSystem<EntityStore> {
+    private final ComponentType<EntityStore, HealthComponent> healthType;
+    
+    @Override
+    public Query<EntityStore> getQuery() {
+        return healthType;
+    }
+    
+    @Override
+    public void tick(float dt, int index,
+                     @Nonnull ArchetypeChunk<EntityStore> chunk,
+                     @Nonnull Store<EntityStore> store,
+                     @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        HealthComponent health = chunk.getComponent(healthType, index);
+        
+        if (health.getHealth() < health.getMaxHealth()) {
+            float regen = 0.5f * dt;  // 0.5 health per second
+            health.setHealth(Math.min(health.getHealth() + regen, health.getMaxHealth()));
+        }
+    }
+    
+    // Optional: enable parallel processing for large entity counts
+    @Override
+    public boolean isParallel(int archetypeChunkSize, int taskCount) {
+        return archetypeChunkSize > 100;  // Parallelize if >100 entities
+    }
+}
+```
+
+### EntityEventSystem
+
+Responds to entity-specific events:
+
+```java
+public class DeathEventSystem extends EntityEventSystem<EntityStore, DeathEvent> {
+    
+    @Override
+    public void onEvent(@Nonnull Ref<EntityStore> entityRef, 
+                        @Nonnull DeathEvent event,
+                        @Nonnull Store<EntityStore> store,
+                        @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        // Handle entity death
+        dropLoot(entityRef, store);
+        playDeathEffect(entityRef);
+        
+        // Schedule entity removal
+        commandBuffer.removeEntity(entityRef, RemoveReason.DEATH);
+    }
+}
+```
+
+### WorldEventSystem
+
+Responds to world-level events:
+
+```java
+public class WorldLoadEventSystem extends WorldEventSystem<EntityStore, WorldLoadEvent> {
+    
+    @Override
+    public void onEvent(@Nonnull WorldLoadEvent event,
+                        @Nonnull Store<EntityStore> store,
+                        @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+        // Handle world load
+        initializeWorldEntities(event.getWorld(), store, commandBuffer);
+    }
+}
+```
+
+---
+
+## CommandBuffer
+
+Deferred operations for thread safety and batching:
+
+```java
+// Get command buffer from store
+CommandBuffer<EntityStore> buffer = store.takeCommandBuffer();
+
+try {
+    // Queue entity creation
+    Holder<EntityStore> holder = registry.newHolder();
+    holder.addComponent(positionType, new PositionComponent(x, y, z));
+    holder.addComponent(healthType, new HealthComponent());
+    buffer.addEntity(holder, AddReason.SPAWN);
+    
+    // Queue component operations
+    buffer.addComponent(existingRef, effectType, new PoisonEffect());
+    buffer.removeComponent(existingRef, shieldType);
+    
+    // Queue entity removal
+    buffer.removeEntity(deadEntityRef, RemoveReason.DEATH);
+    
+    // Execute all queued operations
+    buffer.execute();
+    
+} finally {
+    // Return buffer to pool
+    store.storeCommandBuffer(buffer);
+}
+```
+
+### In System Tick Methods
+
+Systems receive a CommandBuffer as a parameter:
+
+```java
+@Override
+public void tick(float dt, int index,
+                 @Nonnull ArchetypeChunk<EntityStore> chunk,
+                 @Nonnull Store<EntityStore> store,
+                 @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+    
+    HealthComponent health = chunk.getComponent(healthType, index);
+    
+    if (health.getHealth() <= 0) {
+        Ref<EntityStore> ref = chunk.getRef(index);
+        // Queue removal - will be processed after all systems tick
+        commandBuffer.removeEntity(ref, RemoveReason.DEATH);
+    }
+}
+```
+
+---
 
 ## Resources
 
-Shared data accessible by systems:
+Shared data accessible by all systems:
 
 ```java
-// Define resource
-public class GameTimeResource implements Resource {
+public class GameTimeResource implements Resource<EntityStore> {
     private float totalTime;
     private float deltaTime;
-    // getters/setters
+    
+    public float getTotalTime() { return totalTime; }
+    public void setTotalTime(float time) { this.totalTime = time; }
+    public float getDeltaTime() { return deltaTime; }
+    public void setDeltaTime(float dt) { this.deltaTime = dt; }
+    
+    @Override
+    public Resource<EntityStore> clone() {
+        GameTimeResource copy = new GameTimeResource();
+        copy.totalTime = this.totalTime;
+        copy.deltaTime = this.deltaTime;
+        return copy;
+    }
 }
 
-// Register and access
-ResourceType<GameTimeResource> TIME_TYPE =
-    registry.registerResource(GameTimeResource.class, GameTimeResource::new);
-
-GameTimeResource time = registry.getResource(TIME_TYPE);
-```
-
-## Command Buffer
-
-Deferred operations for thread safety:
-
-```java
-CommandBuffer buffer = registry.getCommandBuffer();
-
-// Queue operations
-buffer.createEntity(archetype);
-buffer.addComponent(ref, componentType, component);
-buffer.removeComponent(ref, componentType);
-buffer.destroyEntity(ref);
-
-// Execute at safe point
-buffer.execute();
-```
-
-## Spatial Queries
-
-For location-based queries:
-
-```java
-SpatialStructure spatial = world.getSpatialStructure();
-
-// Find entities near position
-List<Ref> nearby = spatial.query(position, radius);
-
-// Find closest entity
-Ref closest = spatial.findClosest(position, maxDistance);
-
-// K-D Tree for efficient spatial queries
-KDTree<Ref> tree = spatial.getTree();
-tree.insert(position, entity);
-tree.findNearest(queryPosition, k);
-```
-
-## Serialization
-
-Components can be serialized:
-
-```java
-// NonSerialized annotation to exclude
-@NonSerialized
-public class TransientComponent implements Component {
-    // Not saved
-}
-
-// Use Codec for serialization
-public class SerializedComponent implements Component {
-    public static final Codec<SerializedComponent> CODEC = // ...
+// Register in system
+public class TimeSystem extends TickingSystem<EntityStore> {
+    private final ResourceType<EntityStore, GameTimeResource> timeResource = 
+        registerResource(GameTimeResource.class, GameTimeResource::new);
+    
+    @Override
+    public void tick(float dt, int systemIndex, @Nonnull Store<EntityStore> store) {
+        GameTimeResource time = store.getResourceStorage().getResource(timeResource);
+        time.setDeltaTime(dt);
+        time.setTotalTime(time.getTotalTime() + dt);
+    }
 }
 ```
 
-## Best Practices
+---
 
-1. **Keep components small** - Just data, no logic
-2. **Use appropriate systems** - Ticking vs Event-driven
-3. **Batch operations** - Use CommandBuffer for bulk changes
-4. **Query efficiently** - Cache queries, use appropriate query types
-5. **Leverage archetypes** - Group related components
-6. **Use spatial structures** - For location-based queries
-7. **Declare dependencies** - Ensure correct system ordering
-8. **Profile performance** - Use system metrics
+## Store Operations
 
-## Entity Events
+The `Store<ECS_TYPE>` manages entities and executes systems:
 
-### ECS Event Types
+```java
+Store<EntityStore> store = // ...
 
-| Event | Description |
-|-------|-------------|
-| `AddReason` | Why entity was added |
-| `RemoveReason` | Why entity was removed |
-| `EntityEventType` | Per-entity event type |
-| `WorldEventType` | World-level event type |
+// Get entity count
+int count = store.getEntityCount();
+
+// Access archetype chunks
+ArchetypeChunk<EntityStore>[] chunks = store.getArchetypeChunks();
+
+// Get component from entity reference
+HealthComponent health = store.getComponent(entityRef, healthType);
+
+// Get archetype for an entity
+Archetype<EntityStore> archetype = store.getArchetype(entityRef);
+
+// Copy entity to holder
+Holder<EntityStore> holder = store.copyEntity(entityRef);
+```
+
+---
+
+## ArchetypeChunk Operations
+
+Chunks store entities with the same archetype contiguously:
+
+```java
+ArchetypeChunk<EntityStore> chunk = // ...
+
+// Get chunk size
+int size = chunk.size();
+
+// Get entity reference at index
+Ref<EntityStore> ref = chunk.getRef(index);
+
+// Get component at index
+HealthComponent health = chunk.getComponent(healthType, index);
+
+// Check if chunk's archetype contains a component
+boolean hasHealth = chunk.getArchetype().contains(healthType);
+```
+
+---
+
+## Add/Remove Reasons
+
+Track why entities are added or removed:
 
 ```java
 public enum AddReason {
-    SPAWN,
-    LOAD,
-    TRANSFER,
+    SPAWN,      // Newly spawned
+    LOAD,       // Loaded from storage
+    TRANSFER,   // Transferred from another store
     // ...
 }
 
 public enum RemoveReason {
-    DESPAWN,
-    DEATH,
-    UNLOAD,
-    TRANSFER,
+    DESPAWN,    // Normal despawn
+    DEATH,      // Entity died
+    UNLOAD,     // Unloaded to storage
+    TRANSFER,   // Transferred to another store
+    REMOVE,     // Generic removal
     // ...
 }
 ```
 
-## Metrics
+---
 
-System performance is tracked:
+## Component Serialization
+
+Components can be serialized for persistence:
 
 ```java
-SystemMetricData metrics = system.getMetrics();
-long processingTime = metrics.getProcessingTime();
-int entitiesProcessed = metrics.getEntitiesProcessed();
+public class HealthComponent implements Component<EntityStore> {
+    // Codec for serialization
+    public static final BuilderCodec<HealthComponent> CODEC = BuilderCodec
+        .builder(HealthComponent.class, HealthComponent::new)
+        .append("health", Codec.FLOAT, HealthComponent::getHealth, HealthComponent::setHealth)
+        .append("maxHealth", Codec.FLOAT, HealthComponent::getMaxHealth, HealthComponent::setMaxHealth)
+        .build();
+    
+    // ... rest of component
+}
+
+// Register with codec
+ComponentType<EntityStore, HealthComponent> healthType = 
+    registerComponent(HealthComponent.class, "Health", HealthComponent.CODEC);
+```
+
+### NonSerialized Annotation
+
+Mark components that shouldn't be saved:
+
+```java
+@NonSerialized
+public class TransientComponent implements Component<EntityStore> {
+    // This component won't be persisted
+}
+```
+
+---
+
+## Best Practices
+
+1. **Keep components small** - Pure data, no behavior logic
+2. **Use appropriate systems** - `EntityTickingSystem` for simple per-entity logic, `ArchetypeTickingSystem` for bulk processing
+3. **Batch operations** - Use `CommandBuffer` for entity creation/removal during ticks
+4. **Query efficiently** - Cache queries, use `ComponentType` directly when checking for single component
+5. **Leverage archetypes** - Group commonly-used components together
+6. **Enable parallelism** - Override `isParallel()` for CPU-intensive systems with many entities
+7. **Use resources** - For shared data that multiple systems need
+8. **Handle entity removal** - Always use `CommandBuffer.removeEntity()` during system ticks
+
+---
+
+## Example: Complete Damage System
+
+```java
+public class DamageSystem extends System<EntityStore> {
+    
+    // Component types
+    private final ComponentType<EntityStore, HealthComponent> healthType = 
+        registerComponent(HealthComponent.class, "Health", HealthComponent.CODEC);
+    
+    private final ComponentType<EntityStore, DamageQueueComponent> damageQueueType = 
+        registerComponent(DamageQueueComponent.class, DamageQueueComponent::new);
+    
+    // Inner system to process damage
+    public class ProcessDamageSystem extends EntityTickingSystem<EntityStore> {
+        
+        @Override
+        public Query<EntityStore> getQuery() {
+            return Query.and(healthType, damageQueueType);
+        }
+        
+        @Override
+        public void tick(float dt, int index,
+                         @Nonnull ArchetypeChunk<EntityStore> chunk,
+                         @Nonnull Store<EntityStore> store,
+                         @Nonnull CommandBuffer<EntityStore> commandBuffer) {
+            
+            HealthComponent health = chunk.getComponent(healthType, index);
+            DamageQueueComponent queue = chunk.getComponent(damageQueueType, index);
+            
+            // Process all queued damage
+            for (DamageInstance damage : queue.drain()) {
+                health.setHealth(health.getHealth() - damage.getAmount());
+            }
+            
+            // Check for death
+            if (health.getHealth() <= 0) {
+                Ref<EntityStore> ref = chunk.getRef(index);
+                commandBuffer.removeEntity(ref, RemoveReason.DEATH);
+            }
+        }
+    }
+}
 ```

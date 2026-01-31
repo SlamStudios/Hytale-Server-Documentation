@@ -172,7 +172,7 @@ int chunkZ = (int)chunkIndex;           // ChunkUtil.zOfChunkIndex(chunkIndex)
 
 ## ChunkUtil Helper Methods
 
-The `ChunkUtil` class (`com.hypixel.hytale.math.util.ChunkUtil`) provides utility methods. Use these when readability matters more than raw performance, or when you're unsure about edge cases.
+The `ChunkUtil` class (`com.hypixel.hytale.math.util.ChunkUtil`) provides utility methods for chunk coordinate operations. These methods are simple inline bit operations that the JVM will optimize identically to hand-written code, so use whichever approach fits your code style.
 
 ### Coordinate Methods
 

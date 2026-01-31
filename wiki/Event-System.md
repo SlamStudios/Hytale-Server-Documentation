@@ -72,24 +72,56 @@ public interface ICancellable {
 
 ## Event Priority
 
-Handlers are executed in priority order:
+Handlers are executed in priority order (lower values execute first):
 
 ```java
 public enum EventPriority {
-    LOWEST((short)-200),
-    LOW((short)-100),
-    NORMAL((short)0),
-    HIGH((short)100),
-    HIGHEST((short)200),
-    MONITOR((short)300);  // Observe only, don't modify
+    LOWEST,    // First to run, can set initial state
+    LOW,       // Early processing
+    NORMAL,    // Default priority
+    HIGH,      // Late processing
+    HIGHEST,   // Almost last
+    MONITOR    // Observe only - runs last, should NOT modify event
 }
 ```
 
-**Note:** Lower values execute first. MONITOR priority should only observe, never modify.
+**Important:** `MONITOR` priority handlers should only observe events, never cancel or modify them. Use for logging, analytics, etc.
 
 ## Registering Event Handlers
 
-### Basic Registration
+### Via Plugin's EventRegistry (Recommended)
+
+Plugins should use their `EventRegistry` for automatic cleanup on disable:
+
+```java
+public class MyPlugin extends JavaPlugin {
+    @Override
+    protected void setup() {
+        EventRegistry events = getEventRegistry();
+        
+        // Simple registration (NORMAL priority)
+        events.register(PlayerConnectEvent.class, this::onPlayerConnect);
+        
+        // With priority
+        events.register(EventPriority.HIGH, PlayerChatEvent.class, this::onPlayerChat);
+        
+        // With custom numeric priority
+        events.register((short)50, BootEvent.class, event -> {
+            // Handle event
+        });
+    }
+    
+    private void onPlayerConnect(PlayerConnectEvent event) {
+        getLogger().info("Player connecting...");
+    }
+    
+    private void onPlayerChat(PlayerChatEvent event) {
+        // Handle chat
+    }
+}
+```
+
+### Direct EventBus Registration
 
 ```java
 EventBus eventBus = HytaleServer.get().getEventBus();
@@ -102,11 +134,6 @@ eventBus.register(MyEvent.class, event -> {
 // With priority
 eventBus.register(EventPriority.HIGH, MyEvent.class, event -> {
     // Handle high-priority
-});
-
-// With numeric priority
-eventBus.register((short)50, MyEvent.class, event -> {
-    // Custom priority
 });
 ```
 
@@ -178,26 +205,21 @@ future.thenAccept(processedEvent -> {
 });
 ```
 
-## Plugin Event Registry
+## Plugin Event Registry Benefits
 
-Plugins should use their event registry for automatic cleanup:
+Using `getEventRegistry()` instead of direct `EventBus` access provides:
+
+1. **Automatic cleanup** - Handlers are unregistered when plugin disables
+2. **State validation** - Prevents registration when plugin is disabled
+3. **Lifecycle scoping** - Handlers tied to plugin lifecycle
+4. **Thread safety** - Proper synchronization for plugin state
 
 ```java
-public class MyPlugin extends JavaPlugin {
-    @Override
-    protected void setup() {
-        EventRegistry registry = getEventRegistry();
-
-        // Registration is tied to plugin lifecycle
-        registry.register(MyEvent.class, this::handleEvent);
-    }
-}
+// All these registrations are automatically cleaned up on plugin disable:
+getEventRegistry().register(Event1.class, this::handle1);
+getEventRegistry().register(Event2.class, this::handle2);
+getEventRegistry().registerGlobal(KeyedEvent.class, this::handleAll);
 ```
-
-**Benefits:**
-- Automatic unregistration on plugin disable
-- Plugin state validation
-- Scoped to plugin lifecycle
 
 ## Server Events
 
@@ -221,11 +243,16 @@ public class MyPlugin extends JavaPlugin {
 
 ### Player Events
 
-Events related to player actions, connections, etc.
+Events related to player actions and connections. See [Event Types](Event-Types) for the full list including:
+- `PlayerConnectEvent` / `PlayerDisconnectEvent`
+- `PlayerReadyEvent`
+- `PlayerChatEvent`
+- `PlayerInteractEvent`
+- `AddPlayerToWorldEvent` / `DrainPlayerFromWorldEvent`
 
 ### World Events
 
-Events related to world operations, chunk loading, etc.
+Events related to world and chunk operations.
 
 ## Creating Custom Events
 
@@ -320,50 +347,80 @@ When `timeEvents` is enabled, event processing time is tracked for debugging.
 6. **Use async events** - For long-running operations
 7. **Handle exceptions** - Don't let handlers crash the event bus
 
-## Example: Complete Event Flow
+## Example: Using PlayerChatEvent
+
+The actual `PlayerChatEvent` from the server (this is an async event):
+
+```java
+// PlayerChatEvent is IAsyncEvent<String>, ICancellable
+// Register with registerAsync
+eventRegistry.registerAsync(EventPriority.LOW, PlayerChatEvent.class, future -> {
+    return future.thenApply(event -> {
+        // Filter content
+        String filtered = filterBadWords(event.getContent());
+        event.setContent(filtered);
+        return event;
+    });
+});
+
+eventRegistry.registerAsync(EventPriority.NORMAL, PlayerChatEvent.class, future -> {
+    return future.thenApply(event -> {
+        // Check mute status
+        if (isMuted(event.getSender())) {
+            event.setCancelled(true);
+        }
+        return event;
+    });
+});
+
+eventRegistry.registerAsync(EventPriority.MONITOR, PlayerChatEvent.class, future -> {
+    return future.thenApply(event -> {
+        // Log chat (don't modify at MONITOR priority)
+        logChat(event.getSender(), event.getContent());
+        return event;
+    });
+});
+```
+
+## Example: Creating a Custom Sync Event
 
 ```java
 // 1. Define the event
-public class PlayerChatEvent implements IEvent<Player>, ICancellable {
-    private final Player player;
-    private String message;
+public class CustomActionEvent implements IEvent<Void>, ICancellable {
+    private final PlayerRef player;
+    private String data;
     private boolean cancelled;
 
-    public PlayerChatEvent(Player player, String message) {
+    public CustomActionEvent(@Nonnull PlayerRef player, @Nonnull String data) {
         this.player = player;
-        this.message = message;
+        this.data = data;
     }
 
-    public Player getKey() { return player; }
-    public String getMessage() { return message; }
-    public void setMessage(String message) { this.message = message; }
+    @Nonnull public PlayerRef getPlayer() { return player; }
+    @Nonnull public String getData() { return data; }
+    public void setData(@Nonnull String data) { this.data = data; }
+    
+    @Override
     public boolean isCancelled() { return cancelled; }
+    
+    @Override
     public void setCancelled(boolean cancelled) { this.cancelled = cancelled; }
 }
 
 // 2. Register handlers
-eventBus.register(EventPriority.LOW, PlayerChatEvent.class, event -> {
-    // Filter bad words
-    event.setMessage(filterBadWords(event.getMessage()));
-});
-
-eventBus.register(EventPriority.NORMAL, PlayerChatEvent.class, event -> {
-    // Check mute status
-    if (isMuted(event.getKey())) {
+eventRegistry.register(EventPriority.NORMAL, CustomActionEvent.class, event -> {
+    if (shouldBlock(event.getPlayer())) {
         event.setCancelled(true);
     }
 });
 
-eventBus.register(EventPriority.MONITOR, PlayerChatEvent.class, event -> {
-    // Log chat (don't modify here)
-    logChat(event.getKey(), event.getMessage());
-});
-
 // 3. Dispatch the event
-PlayerChatEvent event = new PlayerChatEvent(player, chatMessage);
-eventBus.dispatchFor(PlayerChatEvent.class, player).dispatch(event);
+CustomActionEvent event = new CustomActionEvent(playerRef, "action_data");
+HytaleServer.get().getEventBus()
+    .dispatchFor(CustomActionEvent.class)
+    .dispatch(event);
 
 if (!event.isCancelled()) {
-    broadcastMessage(event.getMessage());
+    performAction(event.getData());
 }
 ```

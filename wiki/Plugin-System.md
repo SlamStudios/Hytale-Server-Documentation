@@ -234,12 +234,13 @@ protected void setup() {
 
 ## Permissions
 
-Plugins define a base permission automatically:
+Plugins have an automatically generated base permission:
 
 ```java
-// Base permission: "{group}.{name}"
+// Base permission is generated from group and name
 String basePermission = getBasePermission();
-// e.g., "com.example.myplugin"
+// Format: "{group}.{name}" (lowercase)
+// e.g., for group "com.example" and name "MyPlugin": "com.example.myplugin"
 ```
 
 ## Data Directory

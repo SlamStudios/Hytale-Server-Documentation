@@ -67,76 +67,88 @@ Entity System
 
 ## Entity Class
 
-Base class for all entities:
+Base class for all entities. Entities are ECS components stored in `EntityStore`.
 
 ```java
-public class Entity {
-    // Default animations
+public abstract class Entity implements Component<EntityStore> {
+    // Entity reference in the ECS
+    @Nullable
+    protected Ref<EntityStore> reference;
+    
+    // Network ID for client sync
+    protected int networkId;
+    
+    // World the entity is in
+    @Nullable
+    protected World world;
+    
+    // Default animations enum
     public static class DefaultAnimations {
-        IDLE, WALK, RUN, JUMP, FALL, ATTACK, // ...
+        // IDLE, WALK, RUN, JUMP, FALL, ATTACK, etc.
     }
-
-    // Entity reference
-    Ref getRef();
-
-    // Position/rotation
-    Vector3f getPosition();
-    void setPosition(Vector3f position);
-    float getYaw();
-    float getPitch();
-
-    // Components
-    <T extends Component> T getComponent(ComponentType<T> type);
-    <T extends Component> void addComponent(ComponentType<T> type, T component);
 }
 ```
+
+**Note:** Entity access is typically done through the ECS component system rather than direct method calls. Use `ComponentAccessor` and `ComponentType` for component access.
 
 ## Living Entity
 
-Base for creatures with health:
+Base for creatures with health (extends Entity):
 
 ```java
-public class LivingEntity extends Entity {
-    // Health management
-    float getHealth();
-    void setHealth(float health);
-    float getMaxHealth();
-    boolean isDead();
-
-    // Damage
-    void damage(float amount, DamageSource source);
-
-    // Effects
-    void addEffect(EntityEffect effect);
-    void removeEffect(EntityEffect effect);
+public abstract class LivingEntity extends Entity {
+    // LivingEntity has its own BuilderCodec for serialization
+    public static final BuilderCodec<LivingEntity> CODEC;
 }
 ```
 
+**Note:** Health, damage, and effects are managed through ECS components (e.g., `HealthComponent`, `DamageDataComponent`, `EffectControllerComponent`) rather than direct methods on LivingEntity.
+
 ## Player Entity
 
-Full player implementation:
+Player implementation (extends LivingEntity, implements CommandSender, PermissionHolder):
 
 ```java
-public class Player extends LivingEntity {
-    // Identity
-    UUID getUuid();
-    String getUsername();
-
-    // Connection
-    PacketHandler getPacketHandler();
-    void sendPacket(Packet packet);
-
-    // Inventory
-    Inventory getInventory();
-    ItemStack getHeldItem();
-
-    // Managers
-    MovementManager getMovementManager();
-    WindowManager getWindowManager();
-    PageManager getPageManager();
-    HudManager getHudManager();
-    CameraManager getCameraManager();
-    HotbarManager getHotbarManager();
+public class Player extends LivingEntity implements CommandSender, PermissionHolder {
+    // Get the player's UUID
+    @Nonnull
+    public UUID getUuid();
+    
+    // Get the player's username  
+    @Nonnull
+    public String getUsername();
+    
+    // Network connection
+    @Nonnull
+    public PacketHandler getPacketHandler();
+    
+    public void sendPacket(@Nonnull Packet packet);
+    
+    // Managers (all @Nonnull)
+    public WindowManager getWindowManager();
+    public PageManager getPageManager();
+    public HudManager getHudManager();
+    public HotbarManager getHotbarManager();
+    public CameraManager getCameraManager();
+    public MovementManager getMovementManager();
+    
+    // Game mode
+    public GameMode getGameMode();
+    public void setGameMode(@Nonnull GameMode gameMode);
+    
+    // CommandSender implementation
+    @Override
+    public void sendMessage(@Nonnull Message message);
+    
+    @Override  
+    public boolean hasPermission(@Nonnull String permission);
+    
+    // Inventory access
+    @Nullable
+    public Inventory getInventory();
+    
+    @Nullable
+    public ItemStack getHeldItem();
 }
 ```
 
